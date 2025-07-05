@@ -1,6 +1,0 @@
-streamlit
-requests
-pandas
-google-search-results
-google-generativeai
-python-dotenv
