@@ -1,0 +1,13 @@
+python-dotenv
+pandas
+pydantic
+requests
+beautifulsoup4
+html2text
+selenium
+readability-lxml
+streamlit
+streamlit-tags
+openpyxl
+google-generativeai
+webdriver-manager
