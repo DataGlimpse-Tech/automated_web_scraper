@@ -93,6 +93,13 @@ class AutomatedPaginationScraper:
                 raise Exception("Failed to fetch initial page content")
             
             # Step 2: Perform automated pagination scraping
+            logging.info(f"Calling scrape_all_paginated_urls with:")
+            logging.info(f"  base_url: {self.base_url}")
+            logging.info(f"  max_pages: {self.pagination_settings['max_pages']}")
+            logging.info(f"  start_page: {self.start_page}")
+            logging.info(f"  end_page: {self.end_page}")
+            logging.info(f"  delay_range: {self.pagination_settings['delay_range']}")
+            
             self.scraped_pages = scrape_all_paginated_urls(
                 base_url=self.base_url,
                 indications=self.pagination_indications,
