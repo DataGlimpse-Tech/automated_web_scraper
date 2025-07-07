@@ -706,24 +706,37 @@ elif st.session_state['scraping_state'] == 'scraping':
                 # Run automated pagination scraping
                 try:
                     st.info("🤖 Starting automated pagination detection...")
+                    st.write(f"📋 **Configuration:**")
+                    st.write(f"- Start Page: {st.session_state.get('start_page', 1)}")
+                    st.write(f"- End Page: {st.session_state.get('end_page', 5)}")
+                    st.write(f"- Max Pages: {st.session_state['max_pages']}")
+                    st.write(f"- Pagination Hints: {st.session_state['pagination_details'] or 'None'}")
                     
                     # First, test pagination detection on the initial page
-                    test_markdown = fetch_html_selenium(st.session_state['urls'][0], attended_mode=False)
-                    test_markdown = html_to_markdown_with_readability(test_markdown)
+                    with st.spinner("Fetching initial page content..."):
+                        test_markdown = fetch_html_selenium(st.session_state['urls'][0], attended_mode=False)
+                        test_markdown = html_to_markdown_with_readability(test_markdown)
+                    
+                    st.success(f"✅ Initial page content fetched ({len(test_markdown)} characters)")
                     
                     # Quick pagination test
-                    pagination_test, test_tokens = detect_pagination_elements(
-                        st.session_state['urls'][0], 
-                        st.session_state['pagination_details'], 
-                        st.session_state['model_selection'], 
-                        test_markdown
-                    )
+                    with st.spinner("Testing pagination detection..."):
+                        pagination_test, test_tokens = detect_pagination_elements(
+                            st.session_state['urls'][0], 
+                            st.session_state['pagination_details'], 
+                            st.session_state['model_selection'], 
+                            test_markdown
+                        )
                     
                     # Check if pagination was detected
                     if isinstance(pagination_test, dict):
                         test_urls = pagination_test.get("page_urls", [])
                     else:
                         test_urls = pagination_test.page_urls if pagination_test else []
+                    
+                    st.info(f"🔍 **Pagination Detection Results:**")
+                    st.write(f"- URLs Found: {len(test_urls)}")
+                    st.write(f"- Tokens Used: {test_tokens.get('input_tokens', 0)} input, {test_tokens.get('output_tokens', 0)} output")
                     
                     if test_urls:
                         st.success(f"🎯 Pagination detected! Found {len(test_urls)} potential pages to scrape.")
@@ -733,8 +746,21 @@ elif st.session_state['scraping_state'] == 'scraping':
                             if len(test_urls) > 10:
                                 st.write(f"... and {len(test_urls) - 10} more URLs")
                     else:
-                        st.warning("⚠️ No pagination URLs detected. Will scrape only the current page.")
-                        st.info("💡 Try adding pagination hints like 'Look for numbered pages' or 'Find Next button'")
+                        st.warning("⚠️ **No pagination URLs detected!**")
+                        st.info("💡 **This is likely why only one page is being scraped.**")
+                        st.write("**Possible reasons:**")
+                        st.write("- Website doesn't use traditional pagination")
+                        st.write("- Pagination is implemented with JavaScript/AJAX")
+                        st.write("- AI model couldn't identify pagination patterns")
+                        st.write("- Try adding specific pagination hints")
+                        
+                        st.write("**Suggestions:**")
+                        st.write("- Add pagination hints like: 'Look for numbered pages 1,2,3' or 'Find Next button'")
+                        st.write("- Check if the website uses infinite scroll instead of pages")
+                        st.write("- Try manual mode for pagination detection")
+                        
+                        # Continue anyway to scrape at least the first page
+                        st.info("🔄 Continuing with single page scraping...")
                     
                     # Proceed with full automated scraping
                     automation_results = run_automated_pagination_scrape(
