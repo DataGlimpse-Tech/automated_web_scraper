@@ -52,20 +52,35 @@ def detect_pagination_elements(url: str, indications: str, selected_model: str, 
                 }
             )
             prompt = f"{prompt_pagination}\n{markdown_content}"
+            
+            # Debug: Log prompt length and preview
+            logging.info(f"Pagination prompt length: {len(prompt)} characters")
+            logging.info(f"Prompt preview: {prompt[:200]}...")
+            
             # Count input tokens using Gemini's method
             input_tokens = model.count_tokens(prompt)
+            logging.info(f"Input tokens for pagination: {input_tokens.total_tokens if hasattr(input_tokens, 'total_tokens') else 'unknown'}")
+            
             completion = model.generate_content(prompt)
+            
             # Extract token counts from usage_metadata
             usage_metadata = completion.usage_metadata
             token_counts = {
                 "input_tokens": usage_metadata.prompt_token_count,
                 "output_tokens": usage_metadata.candidates_token_count
             }
+            
             # Get the result
             response_content = completion.text
             
             # Log the response content for debugging
-            logging.info(f"Gemini Flash response content: {response_content[:500]}...")
+            logging.info(f"Gemini pagination response length: {len(response_content)} characters")
+            logging.info(f"Gemini pagination response preview: {response_content[:500]}...")
+            
+            # Check if response is empty or very short
+            if not response_content or len(response_content.strip()) < 10:
+                logging.warning("Very short or empty response from Gemini for pagination")
+                return PaginationData(page_urls=[]), token_counts
             
             # Try to parse the response as JSON
             try:
@@ -133,6 +148,14 @@ def scrape_all_paginated_urls(base_url: str, indications: str, selected_model: s
     current_markdown = initial_markdown
     current_url = base_url
     
+    # Debug logging
+    logging.info(f"Pagination scraping parameters:")
+    logging.info(f"  start_page: {start_page}")
+    logging.info(f"  end_page: {end_page}")
+    logging.info(f"  max_pages: {max_pages}")
+    logging.info(f"  target_pages_to_scrape: {target_pages_to_scrape}")
+    logging.info(f"  base_url: {base_url}")
+    
     # Add initial page to processed URLs
     processed_urls.add(current_url)
     
@@ -140,7 +163,7 @@ def scrape_all_paginated_urls(base_url: str, indications: str, selected_model: s
     if start_page > 1:
         # First detect pagination to find the starting page URL
         try:
-            pagination_data, _, _ = detect_pagination_elements(
+            pagination_data, token_counts = detect_pagination_elements(
                 current_url, indications, selected_model, current_markdown
             )
             
@@ -161,6 +184,7 @@ def scrape_all_paginated_urls(base_url: str, indications: str, selected_model: s
             if start_url:
                 current_url = start_url
                 # Fetch content of the starting page
+                from scraper import fetch_html_selenium, html_to_markdown_with_readability
                 raw_html = fetch_html_selenium(start_url, attended_mode=False)
                 current_markdown = html_to_markdown_with_readability(raw_html)
                 logging.info(f"Starting from page {start_page}: {start_url}")
@@ -195,10 +219,7 @@ def scrape_all_paginated_urls(base_url: str, indications: str, selected_model: s
             scraped_pages.append(page_data)
             pages_scraped += 1
             
-            # Check if we've scraped enough pages
-            if pages_scraped >= target_pages_to_scrape:
-                logging.info(f"Reached target of {target_pages_to_scrape} pages. Stopping.")
-                break
+            logging.info(f"Scraped page {current_page_num} ({pages_scraped}/{target_pages_to_scrape})")
             
             # Get pagination URLs
             if isinstance(pagination_data, dict):
@@ -206,34 +227,45 @@ def scrape_all_paginated_urls(base_url: str, indications: str, selected_model: s
             else:
                 page_urls = pagination_data.page_urls if pagination_data else []
             
+            logging.info(f"Page {current_page_num}: Found {len(page_urls)} pagination URLs")
+            for i, url in enumerate(page_urls):
+                logging.info(f"  URL {i+1}: {url}")
+            
+            # Check if we've reached the target end page
+            if current_page_num >= end_page:
+                logging.info(f"Reached target end page {end_page}. Stopping.")
+                break
+            
             # Find next page URL that hasn't been processed
             next_url = None
             
             # Strategy 1: Look for URLs that contain page numbers higher than current page
+            expected_next_page = current_page_num + 1
+            
             for url in page_urls:
                 absolute_url = urljoin(current_url, url) if not url.startswith(('http://', 'https://')) else url
                 
                 if absolute_url not in processed_urls:
-                    # Check if this URL likely represents the next page
-                    if current_page_num == 1:  # For first page, accept any new URL
-                        next_url = absolute_url
-                        break
-                    else:
-                        # For subsequent pages, try to find URLs with incrementing numbers
-                        import re
-                        current_page_matches = re.findall(r'(?:page[=\/]?|p[=\/]?)(\d+)', current_url.lower())
-                        next_page_matches = re.findall(r'(?:page[=\/]?|p[=\/]?)(\d+)', absolute_url.lower())
-                        
-                        if current_page_matches and next_page_matches:
-                            current_num = int(current_page_matches[-1])
-                            next_num = int(next_page_matches[-1])
-                            if next_num > current_num:
-                                next_url = absolute_url
-                                break
-                        else:
-                            # If no clear pattern, accept the first unprocessed URL
+                    # Check if this URL represents the expected next page
+                    import re
+                    page_matches = re.findall(r'(?:page[=\/]?|p[=\/]?)(\d+)', absolute_url.lower())
+                    
+                    if page_matches:
+                        page_num = int(page_matches[-1])
+                        if page_num == expected_next_page:
                             next_url = absolute_url
+                            logging.info(f"Found exact next page {expected_next_page}: {next_url}")
                             break
+                        elif page_num > current_page_num:
+                            # If we can't find exact next page, use any higher numbered page
+                            if not next_url or page_num < int(re.findall(r'(?:page[=\/]?|p[=\/]?)(\d+)', next_url.lower())[-1]):
+                                next_url = absolute_url
+                                logging.info(f"Found higher page {page_num}: {next_url}")
+                    elif current_page_num == 1:
+                        # For first page, if no clear numbering, accept first unprocessed URL
+                        next_url = absolute_url
+                        logging.info(f"First page: accepting URL {next_url}")
+                        break
             
             # Strategy 2: If no URL found, look for common pagination patterns
             if not next_url:
@@ -250,6 +282,11 @@ def scrape_all_paginated_urls(base_url: str, indications: str, selected_model: s
                 logging.info(f"No more pagination URLs found after page {current_page_num}. Total pages scraped: {pages_scraped}")
                 logging.info(f"URLs found on last page: {page_urls}")
                 logging.info(f"Processed URLs so far: {list(processed_urls)}")
+                break
+            
+            # Check if we've scraped enough pages before proceeding to next page
+            if pages_scraped >= target_pages_to_scrape:
+                logging.info(f"Reached target of {target_pages_to_scrape} pages. Stopping before processing next page.")
                 break
             
             # Add delay between requests to be respectful
