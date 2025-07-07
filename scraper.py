@@ -166,6 +166,10 @@ def generate_system_message(listing_model: BaseModel) -> str:
                         from the given text and convert it into a pure JSON format. The JSON should contain only the structured data extracted from the text, 
                         with no additional commentary, explanations, or extraneous information. 
                         You could encounter cases where you can't find the data of the fields you have to extract or the data will be in a foreign language.
+                        
+                        CRITICAL: Your response must be ONLY valid JSON. Do not include any text before or after the JSON. 
+                        Do not include markdown formatting, code blocks, or any explanatory text.
+                        
                         Please process the following text and provide the output in pure JSON format with no words before or after the JSON:
     Please ensure the output strictly follows this schema:
 
@@ -204,7 +208,18 @@ def format_data(data, DynamicListingsContainer, DynamicListingModel, selected_mo
             "input_tokens": usage_metadata.prompt_token_count,
             "output_tokens": usage_metadata.candidates_token_count
         }
-        return completion.text, token_counts
+        
+        # Get the response text
+        response_text = completion.text
+        
+        # Basic validation to ensure we have a valid response
+        if not response_text or not response_text.strip():
+            raise ValueError("Empty response from Gemini API")
+            
+        # Log the first 200 characters for debugging
+        print(f"Gemini response preview: {response_text[:200]}...")
+        
+        return response_text, token_counts
     else:
         raise ValueError(f"Unsupported model: {selected_model}. Only 'gemini-1.5-flash' is supported.")
 
@@ -219,7 +234,30 @@ def save_formatted_data(formatted_data, output_folder: str, json_file_name: str,
         try:
             formatted_data_dict = json.loads(formatted_data)
         except json.JSONDecodeError:
-            raise ValueError("The provided formatted data is a string but not valid JSON.")
+            # Try to extract JSON from the response (sometimes Gemini adds extra text)
+            import re
+            
+            # Look for JSON pattern in the string
+            json_match = re.search(r'\{.*\}', formatted_data, re.DOTALL)
+            if json_match:
+                try:
+                    formatted_data_dict = json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    # If still failing, create a fallback structure
+                    formatted_data_dict = {
+                        "error": "Failed to parse JSON response",
+                        "raw_response": formatted_data,
+                        "listings": []
+                    }
+                    print(f"Warning: Failed to parse JSON response. Raw response: {formatted_data[:500]}...")
+            else:
+                # No JSON found, create fallback structure
+                formatted_data_dict = {
+                    "error": "No JSON found in response",
+                    "raw_response": formatted_data,
+                    "listings": []
+                }
+                print(f"Warning: No JSON found in response. Raw response: {formatted_data[:500]}...")
     else:
         # Handle data from OpenAI or other sources
         formatted_data_dict = formatted_data.dict() if hasattr(formatted_data, 'dict') else formatted_data
