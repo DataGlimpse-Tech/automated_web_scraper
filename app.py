@@ -355,6 +355,16 @@ if (not extract_all_fields and
                         st.warning("No field suggestions found.")
                     st.rerun()
 
+# Debug info in sidebar
+if st.session_state['search_mode'] == 'manual' and not extract_all_fields:
+    st.sidebar.markdown("### 🔍 Field Suggestions Debug")
+    if not url_input.strip():
+        st.sidebar.info("Enter a URL to enable field suggestions")
+    elif not st.session_state.get('gemini_api_key'):
+        st.sidebar.warning("Enter Gemini API key to enable field suggestions")
+    else:
+        st.sidebar.success("Field suggestions available! Click 'Get Field Suggestions' button above.")
+
 # Display suggested fields if available and not extracting all fields
 if not extract_all_fields and st.session_state['suggested_fields']:
     st.sidebar.markdown("### 💡 Suggested Fields")
@@ -641,13 +651,32 @@ elif st.session_state['scraping_state'] == 'scraping':
                 # Create dynamic models
                 DynamicListingModel = create_dynamic_listing_model(actual_fields)
                 DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
-                # Format data
-                formatted_data, token_counts = format_data(
-                    markdown, DynamicListingsContainer, DynamicListingModel, st.session_state['model_selection']
-                )
-                # Save formatted data
-                df = save_formatted_data(formatted_data, output_folder, f'sorted_data_1.json', f'sorted_data_1.xlsx')
-                all_data.append(formatted_data)
+                
+                # Format data with error handling
+                try:
+                    formatted_data, token_counts = format_data(
+                        markdown, DynamicListingsContainer, DynamicListingModel, st.session_state['model_selection']
+                    )
+                    
+                    # Save formatted data with error handling
+                    df = save_formatted_data(formatted_data, output_folder, f'sorted_data_1.json', f'sorted_data_1.xlsx')
+                    
+                    if df is not None:
+                        all_data.append(formatted_data)
+                        st.success("✅ Data extracted and saved successfully!")
+                    else:
+                        st.warning("⚠️ Data was saved but DataFrame creation failed")
+                        all_data.append(formatted_data)
+                        
+                except Exception as e:
+                    st.error(f"❌ Error during data extraction: {str(e)}")
+                    st.info("💡 This might be due to:")
+                    st.write("- Invalid response from AI model")
+                    st.write("- Network connectivity issues")  
+                    st.write("- Malformed website content")
+                    st.write("- API rate limits")
+                    # Continue with empty data to avoid complete failure
+                    all_data.append({"error": str(e), "listings": []})
         else:
             # Non-attended mode or driver not available
             
@@ -772,11 +801,17 @@ elif st.session_state['scraping_state'] == 'scraping':
                         actual_fields = st.session_state['fields']
                         DynamicListingModel = create_dynamic_listing_model(actual_fields)
                         DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
-                        formatted_data, token_counts = format_data(
-                            markdown, DynamicListingsContainer, DynamicListingModel, st.session_state['model_selection']
-                        )
-                        save_formatted_data(formatted_data, output_folder, f'sorted_data_1.json', f'sorted_data_1.xlsx')
-                        all_data.append(formatted_data)
+                        
+                        try:
+                            formatted_data, token_counts = format_data(
+                                markdown, DynamicListingsContainer, DynamicListingModel, st.session_state['model_selection']
+                            )
+                            save_formatted_data(formatted_data, output_folder, f'sorted_data_1.json', f'sorted_data_1.xlsx')
+                            all_data.append(formatted_data)
+                            st.success("✅ Fallback scraping completed successfully!")
+                        except Exception as e:
+                            st.error(f"❌ Error during fallback scraping: {str(e)}")
+                            all_data.append({"error": str(e), "listings": []})
             
             else:
                 # Original non-automated pagination logic
@@ -825,13 +860,20 @@ elif st.session_state['scraping_state'] == 'scraping':
                     # Create dynamic models
                     DynamicListingModel = create_dynamic_listing_model(actual_fields)
                     DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
-                    # Format data
-                    formatted_data, token_counts = format_data(
-                        markdown, DynamicListingsContainer, DynamicListingModel, st.session_state['model_selection']
-                    )
-                    # Save formatted data
-                    df = save_formatted_data(formatted_data, output_folder, f'sorted_data_{i}.json', f'sorted_data_{i}.xlsx')
-                    all_data.append(formatted_data)
+                    
+                    # Format data with error handling
+                    try:
+                        formatted_data, token_counts = format_data(
+                            markdown, DynamicListingsContainer, DynamicListingModel, st.session_state['model_selection']
+                        )
+                        # Save formatted data
+                        df = save_formatted_data(formatted_data, output_folder, f'sorted_data_{i}.json', f'sorted_data_{i}.xlsx')
+                        all_data.append(formatted_data)
+                        if i == 1:  # Only show success message for first URL
+                            st.success(f"✅ URL {i}: Data extracted successfully!")
+                    except Exception as e:
+                        st.error(f"❌ URL {i}: Error during data extraction: {str(e)}")
+                        all_data.append({"error": str(e), "listings": []})
 
         # Clean up driver if used
         if driver:
